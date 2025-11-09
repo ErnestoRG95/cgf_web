@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configurador Alarma Puerta</title>
+    <style>
+        :root {
+            --color-primario: #007bff;
+            --color-fondo: #f4f7f6;
+            --color-tarjeta: #ffffff;
+            --color-texto: #333;
+            --color-borde: #ddd;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--color-fondo);
+            color: var(--color-texto);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .contenedor {
+            width: 100%;
+            max-width: 500px;
+            background-color: var(--color-tarjeta);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            border: 1px solid var(--color-borde);
+            overflow: hidden;
+        }
+        header {
+            padding: 20px;
+            border-bottom: 1px solid var(--color-borde);
+        }
+        h1 {
+            margin: 0;
+            color: var(--color-primario);
+            font-size: 1.5em;
+        }
+        .paso {
+            padding: 25px;
+            border-bottom: 1px solid var(--color-borde);
+        }
+        .paso:last-child {
+            border-bottom: none;
+        }
+        .paso h2 {
+            margin-top: 0;
+            font-size: 1.1em;
+            font-weight: 600;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            font-size: 1em;
+            font-weight: 600;
+            color: #fff;
+            background-color: var(--color-primario);
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #aaa;
+            cursor: not-allowed;
+        }
+        .form-grupo {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 10px;
+            font-size: 1em;
+            border: 1px solid var(--color-borde);
+            border-radius: 5px;
+            box-sizing: border-box; /* Importante para que el padding no rompa el ancho */
+        }
+        #log {
+            background-color: #222;
+            color: #00ff00;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 0.9em;
+            padding: 15px;
+            max-height: 150px;
+            overflow-y: auto;
+            border-radius: 5px;
+            margin-top: 15px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="contenedor">
+        <header>
+            <h1>Configurador Alarma Puerta</h1>
+        </header>
+
+        <div class="paso">
+            <h2>Paso 1: Conectar Dispositivo</h2>
+            <button id="btn-conectar">Buscar y Conectar</button>
+        </div>
+
+        <div class="paso">
+            <h2>Paso 2: Enviar Credenciales</h2>
+            <form id="form-config">
+                <div class="form-grupo">
+                    <label for="ssid">Nombre WiFi (SSID)</label>
+                    <input type="text" id="ssid" required>
+                </div>
+                <div class="form-grupo">
+                    <label for="pass">Contraseña WiFi</label>
+                    <input type="password" id="pass">
+                </div>
+                <div class="form-grupo">
+                    <label for="token">Token del Bot de Telegram</label>
+                    <input type="text" id="token" required>
+                </div>
+                <button id="btn-guardar" type="submit" disabled>Guardar y Reiniciar</button>
+            </form>
+        </div>
+
+        <div class="paso">
+            <h2>Registro de eventos</h2>
+            <div id="log">Esperando acciones...</div>
+        </div>
+    </div>
+
+    <script>
+        // --- Referencias a los elementos del DOM ---
+        const btnConectar = document.getElementById('btn-conectar');
+        const btnGuardar = document.getElementById('btn-guardar');
+        const formConfig = document.getElementById('form-config');
+        const logElement = document.getElementById('log');
+        
+        // --- UUIDs (Deben coincidir 100% con tu código C) ---
+        const UUID_SERVICIO = 0x180A;
+        const UUID_CHAR_SSID = 0x2A2B;
+        const UUID_CHAR_PASS = 0x2A2C;
+        const UUID_CHAR_TOKEN = 0x2A2D;
+        const UUID_CHAR_CONTROL = 0x2A2F;
+
+        // --- Variables Globales para guardar el estado ---
+        let dispositivo = null;
+        let servicio = null;
+        let charSsid = null;
+        let charPass = null;
+        let charToken = null;
+        let charControl = null;
+
+        // --- Función para escribir en el log de la página ---
+        function log(mensaje) {
+            console.log(mensaje);
+            logElement.innerHTML = mensaje + "<br>" + logElement.innerHTML;
+        }
+
+        // --- Lógica del Botón CONECTAR ---
+        btnConectar.addEventListener('click', async () => {
+            log("Buscando dispositivo 'PUERTA_SETUP_BLE'...");
+            try {
+                // 1. Pedir al navegador que muestre el pop-up de conexión
+                dispositivo = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'PUERTA_SETUP_BLE' }],
+                    optionalServices: [UUID_SERVICIO]
+                });
+
+                log("Dispositivo encontrado. Conectando al servidor GATT...");
+                
+                // 2. Conectar al dispositivo y al servidor GATT
+                const server = await dispositivo.gatt.connect();
+                log("Conectado al servidor GATT.");
+
+                // 3. Obtener el servicio
+                servicio = await server.getPrimaryService(UUID_SERVICIO);
+                log("Servicio principal (0x180A) obtenido.");
+
+                // 4. Obtener TODAS las características que necesitamos
+                log("Obteniendo características...");
+                charSsid = await servicio.getCharacteristic(UUID_CHAR_SSID);
+                charPass = await servicio.getCharacteristic(UUID_CHAR_PASS);
+                charToken = await servicio.getCharacteristic(UUID_CHAR_TOKEN);
+                charControl = await servicio.getCharacteristic(UUID_CHAR_CONTROL);
+                
+                log("¡Listo! Características obtenidas. Ya puedes enviar las credenciales.");
+                
+                // 5. Habilitar el formulario y el botón de guardar
+                btnGuardar.disabled = false;
+                btnConectar.disabled = true;
+                btnConectar.innerText = "¡Conectado!";
+
+            } catch(error) {
+                log(`Error: ${error.message}`);
+            }
+        });
+
+        // --- Lógica del Botón GUARDAR ---
+        formConfig.addEventListener('submit', async (e) => {
+            e.preventDefault(); // Evita que el formulario se envíe
+            
+            if (!charControl || !charSsid || !charPass || !charToken) {
+                log("Error: No se ha conectado al dispositivo o faltan características.");
+                return;
+            }
+
+            try {
+                log("Enviando credenciales...");
+                btnGuardar.disabled = true;
+                btnGuardar.innerText = "Enviando...";
+
+                // Coger los valores del formulario
+                const ssid = document.getElementById('ssid').value;
+                const pass = document.getElementById('pass').value;
+                const token = document.getElementById('token').value;
+
+                // 1. Escribir SSID
+                log("Escribiendo SSID...");
+                await charSsid.writeValue(new TextEncoder().encode(ssid));
+
+                // 2. Escribir Contraseña
+                log("Escribiendo Contraseña...");
+                await charPass.writeValue(new TextEncoder().encode(pass));
+                
+                // 3. Escribir Token
+                log("Escribiendo Token...");
+                await charToken.writeValue(new TextEncoder().encode(token));
+
+                // 4. Escribir el comando de control (0x01) para reiniciar
+                log("Enviando comando de reinicio...");
+                await charControl.writeValue(new Uint8Array([0x01]));
+
+                log("¡Éxito! Credenciales enviadas. El dispositivo se reiniciará.");
+                alert("¡Configuración enviada! El dispositivo se desconectará y reiniciará.");
+                
+                // Desconectar
+                if (dispositivo.gatt.connected) {
+                    dispositivo.gatt.disconnect();
+                }
+
+                // Resetear la UI
+                btnGuardar.disabled = true;
+                btnGuardar.innerText = "Guardar y Reiniciar";
+                btnConectar.disabled = false;
+                btnConectar.innerText = "Buscar y Conectar";
+
+            } catch(error) {
+                log(`Error al guardar: ${error.message}`);
+                btnGuardar.disabled = false;
+                btnGuardar.innerText = "Reintentar Guardar";
+            }
+        });
+
+    </script>
+</body>
+</html>
